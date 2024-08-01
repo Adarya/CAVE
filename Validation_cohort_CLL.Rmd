@@ -1,0 +1,447 @@
+---
+title: "CLL validation cohort"
+author: "Adar Yaacov"
+date: "22 10 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(vcfR)
+library(readxl)
+library(MutSigTools)
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(MutationalPatterns)
+library(reshape2)
+
+```
+
+
+```{r read data, include=FALSE}
+setwd("C:/Users/Yoga920/OneDrive - mail.huji.ac.il/Lab Shai/CLL/CLL_V3")
+#val_calls <- readxl::read_xlsx("seuil 005 2eme serie_TS.xlsx", sheet = 101)
+val_calls <- readxl::read_xlsx("data/2eme serie 00005 with 156 single sheet 1.2.xlsx", sheet = 1)
+
+#cleansing
+val_calls <- val_calls %>% filter(Frequency < 5) %>% filter(Type == "SNP")
+colnames(val_calls)[26] <- "Exon_raw"
+val_exon_calls <- exons_xslx(val_calls)
+```
+
+```{r exons}
+#plot
+vaf_by_exons_val <- ggplot(val_exon_calls, aes(x=Exon,y=VAF))+geom_boxplot(outlier.size = 5.5, outlier.alpha = 0.7, fill = "red", colour = "black")+ggtitle("Validation cohort") + theme(plot.title = element_text(hjust = 0.5),panel.grid.major = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"),text = element_text(size = 45, face="bold"), axis.text.x = element_text(size=40, angle = 45, hjust = 1,)) + scale_y_continuous(name = "VAF", limits = c(0,0.05), breaks = seq(0,0.05,0.005), labels = scales::percent_format(accuracy = 0.1)) + scale_x_discrete(name = NULL)
+
+tiff("Figures_paper/VAL VAF by exons.tiff", units = "in", width = 10, height = 14, res = 300)
+vaf_by_exons_val
+dev.off()
+
+#norm
+norm_calls_above_vaf_val <- as.data.frame(t(rbind(exon_size_norm_vaf(exon_sizes, val_exon_calls),
+                              exon_size_norm_vaf(exon_sizes, val_exon_calls),
+                              exon_size_norm_vaf(exon_sizes, val_exon_calls),
+                              exon_size_norm_vaf(exon_sizes, val_exon_calls))))
+norm_calls_above_vaf_val$Exon <- factor(row.names(norm_calls_above_vaf),
+                                    levels = levels(val_exon_calls$Exon))
+
+norm_008_val <- ggplot(norm_calls_above_vaf_val, aes(x=Exon, y=Above_0.008))+
+    geom_col(width = .95, color = "dark red") +
+    scale_x_discrete(name = NULL) + 
+    scale_y_continuous(name = "Calls per exon length", limits = c(0,0.4))+
+    ggtitle("0.8% cutoff")+
+    theme(
+          axis.text.y = element_text(size = 8, face = "bold"),
+          axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+tiff("Figures_paper/VAL_calls_per_exon_008_v5.tiff", res = 300, width = 480, height = 640)
+norm_008_val
+dev.off()
+
+norm_005_val <- ggplot(norm_calls_above_vaf_val, aes(x=Exon, y=Above_0.005))+
+    geom_col(width = .95, color = "dark red") +
+    scale_x_discrete(name = NULL) + 
+    scale_y_continuous(name = "Calls per exon length", limits = c(0,0.42))+
+    ggtitle("0.5% cutoff")+
+    theme(
+          axis.text.y = element_text(size = 8, face = "bold"),
+          axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+
+tiff("Figures_paper/VAL_calls_per_exon_005_v5.tiff", res = 300, width = 480, height = 640)
+norm_005_val
+dev.off()
+```
+
+add gamma beta & stuff
+```{r exons w gamma beta}
+val_calls$Exon_v4 <- ifelse(substr(val_calls$Exon_raw, 11, 12) == "SA", "Splice acceptor", val_calls$Exon_raw)
+val_calls$Exon_v4 <- ifelse(substr(val_calls$Exon_v4, 11, 12) == "SD", "Splice donor", val_calls$Exon_v4)
+val_calls$Exon_v4 <- ifelse(substr(val_calls$Exon_v4, 1, 6) == "Intron", "Intron", val_calls$Exon_v4)
+
+val_calls$Exon_group <- ifelse(val_calls$Exon_v4 %in% c("2","3","4","5","6","7","8", "9","10","11", 
+               "Splice acceptor", "Splice donor"), "Mut", "Unmut")
+
+val_calls$Exon_v4 <- factor(
+    val_calls$Exon_v4,
+    levels = c("2","3","4","5","6","7","8", "9","10","11", 
+               "Splice acceptor", "Splice donor", "Exon_09_beta",
+               "Exon_09_gamma", "2_non_coding","11_non_coding","Intron"))
+```
+#plot
+```{r}
+vaf_by_exons_val <- ggplot(val_calls %>% filter(Exon_v4 != "Intron"), 
+                       aes(x=Exon_v4,y=Frequency,color=Exon_group))+
+    geom_boxplot(lwd=0.2,
+                 outlier.alpha = 0.7, fill = "black")+ggtitle("Verification cohort") + 
+    theme(
+        plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.title = element_blank(), legend.position = "none") + 
+    scale_y_continuous(name = "VAF (%)", limits = c(0,5), breaks = seq(0,5,0.5))+#, labels = scales::percent_format(accuracy = 0.1)) + 
+    scale_x_discrete(name = NULL)
+
+tiff("Figures_paper/VAL VAF by exons v5.tiff", width = 860, height = 1080, res = 300)
+print(vaf_by_exons_val)
+dev.off()
+```
+
+```{r GENIE}
+# genie_analysis_val <- pvals(val_exon_calls, genie, TCGA = NULL) #0.08,0.02,100
+
+pvalsplot_val <- ggplot(genie_analysis_val, aes(x = VAF_threshold*100, y = num_pvals))+ geom_point(size = 2.5) + 
+    ggtitle("Verification cohort - GENIE") +
+    theme(
+          text = element_text(face="bold"),
+          plot.title = element_text(hjust = 0.5), 
+          axis.text.x = element_text(angle = 45,hjust = 1)) +
+    scale_y_continuous(name = "P-value", breaks = seq(0,1,0.075)) +
+    scale_x_continuous(name = "VAF threshold (%)", breaks = seq(0.15,0.8,0.05))+#, labels = scales::percent_format(accuracy = 0.01))+
+    geom_smooth(se = FALSE, size = 1)
+pvalsplot_val
+
+tiff("Figures_paper/VAL Pvals by VAF GENIE v5.tiff", width = 920, height = 920*1.4, res = 300)
+print(pvalsplot_val)
+dev.off()
+
+pvalsplot_zoomIn_val <- ggplot(genie_analysis_val[genie_analysis_val$VAF_threshold >=0.0035 & genie_analysis_val$VAF_threshold <= 0.0045,],
+                           aes(x = VAF_threshold*100, y = num_pvals))+ 
+    geom_point(size = 2.5) + 
+    theme_bw()+
+    theme(text = element_text(size = 14, 
+        face="bold"),
+        axis.text = element_text(colour = "black"),
+          plot.title = element_text(size = 14, 
+              hjust = 0.5), 
+          axis.text.x = element_text(size = 14, 
+              angle = 90, vjust = 0.3)) +
+    scale_y_continuous(name = "P-value", breaks = seq(0,1,0.0005)) +
+    scale_x_continuous(name = "VAF threshold (%)", breaks = seq(0.15,0.8,0.01))+#, labels = scales::percent_format(accuracy = 0.01))+
+    geom_smooth(se = FALSE, size = 1)
+pvalsplot_zoomIn_val
+
+tiff("Figures_paper/VAL_Pvals_zoomin_genie v5.tiff", width = 920, height = 920*1.4, res = 300)
+pvalsplot_zoomIn_val
+dev.off()
+
+
+```
+
+TCGA 
+```{r TCGA analysis}
+tcga_analysis_val <- pvals(val_exon_calls, genie, TCGA = tcga) #0.1, 0.8, 113
+
+tcga_pvalsplot_val <- ggplot(tcga_analysis_val, aes(x = VAF_threshold*100, y = Pval_TCGA))+ geom_point(size = 2.5) + 
+    ggtitle("Verification cohort - TCGA") +
+    theme(
+          text = element_text(face="bold"),
+          plot.title = element_text(hjust = 0.5), 
+          axis.text.x = element_text(angle = 45,hjust = 1)) +
+    scale_y_continuous(name = "P-value", breaks = seq(0,1,0.1)) +
+    scale_x_continuous(name = "VAF threshold (%)", breaks = seq(0.1,0.8,0.1))+#, labels = scales::percent_format(accuracy = 0.01))+
+    geom_smooth(se = FALSE, size = 1)
+
+tiff("Figures_paper/VAL Pvals by VAF TCGA v5.tiff", width = 920, height = 920*1.4, res = 300)
+print(tcga_pvalsplot_val)
+dev.off()
+
+tcga_pvalsplot_zoomIn_val <- ggplot(tcga_analysis_val[tcga_analysis_val$VAF_threshold >=0.003& tcga_analysis_val$VAF_threshold <= 0.004,],
+                           aes(x = VAF_threshold*100, y = Pval_TCGA))+ 
+    geom_point(size = 2.5) + 
+    theme_bw()+
+    theme(text = element_text(size = 14, 
+        face="bold"),
+        axis.text = element_text(colour = "black"),
+          plot.title = element_text(size = 14, 
+              hjust = 0.5), 
+          axis.text.x = element_text(size = 14, 
+              angle = 90, vjust = 0.3)) +
+    scale_y_continuous(name = "P-value", breaks = seq(0,1,0.002)) +
+    scale_x_continuous(name = "VAF threshold (%)", breaks = seq(0.15,0.8,0.01))+#, labels = scales::percent_format(accuracy = 0.01))+
+    geom_smooth(se = FALSE, size = 1)
+
+tiff("Figures_paper/VAL Pvals_zoomin_genie TCGA v5.tiff", width = 920, height = 920*1.4, res = 300)
+print(tcga_pvalsplot_zoomIn_val)
+dev.off()
+```
+```{r CSD}
+# csd_analysis_val <- CSD_fun(val_exon_calls, csd) #0.001, 0.01, 91
+
+CSD_plot_val <- ggplot(csd_analysis_val, aes(VAF_threshold*100))+
+    geom_line(aes(y=Percent_positions_above, colour = "% of positions in CLL cohort"),size =3) + 
+    geom_line(aes(y=Percent_above_threshold, colour = "% of positions in CSD"),size = 3) + 
+    scale_y_continuous(name = "Percent", limits = c(0,101)) + 
+    theme(panel.grid.major = element_blank(),panel.background = element_blank(), 
+          axis.line = element_line(colour = "black"), 
+          text = element_text(size = 40,face = "bold"), 
+          legend.position = c(0.55,0.9),legend.title = element_blank(), 
+          legend.text = element_text(size=25,face = "bold"), 
+          axis.text.x=element_text(angle = 45,hjust = 1)) + 
+    scale_x_continuous(name = "VAF threshold (%)", breaks = seq(0.1,1,0.1))#, labels = scales::percent_format(accuracy = 0.1))
+CSD_plot_val
+
+tiff("Figures_paper/VAL_CSD v4.tiff", units = "in", width = 9, height = 9, res = 300)
+CSD_plot_val
+dev.off()
+
+CSD_plot_diff_val <- ggplot(csd_analysis_val, aes(VAF_threshold*100))+geom_line(aes(y=diff), size = 4) + 
+    scale_y_continuous(name = "CSD - CLL (%)", limits = c(0,32), breaks = seq(0,40,5)) + 
+    theme(panel.grid.major = element_blank(),panel.background = element_blank(), 
+          axis.line = element_line(colour = "black"), 
+          text = element_text(size = 40,face = "bold"), 
+          legend.position = c(0.72,0.9),legend.title = element_blank(), 
+          legend.text = element_text(size=25,face = "bold") , 
+          axis.text.x=element_text(angle = 45,hjust = 1)) + 
+    scale_x_continuous(name = "VAF threshold (%)", breaks = seq(0.1,1,0.1))
+CSD_plot_diff_val
+
+```
+
+
+```{r model}
+
+val_exon_calls_model <- val_exon_calls
+
+val_exon_calls_model <- val_exon_calls_model %>% 
+    inner_join(model[,c(1,2,9,10,18,128,129)],
+              by = c("cDNA_variant"))
+
+val_exon_calls_model <- filter(val_exon_calls_model, Variant_Classification == "Missense")
+val_exon_calls_model$final_label <- ifelse(val_exon_calls_model$predictions == "D" | 
+                                            (val_exon_calls_model$predictions == "null" & val_exon_calls_model$label == "D"),
+                                        "D","ND")
+
+
+model_analysis_val <- ml_model_fun(val_exon_calls_model)#0.01,0.001,28
+aboves_val <- model_analysis_val[[1]]
+belows_val <- model_analysis_val[[2]]
+```
+
+```{r plot}
+D_ND_Ratio_plot_val <- ggplot(aboves_val[aboves_val$VAF_threshold <= 0.009,], 
+                          aes(x=VAF_threshold*100,y=log2(`D/ND_Ratio`), label = VAF_threshold,
+                              col="Above threshold"))+
+    geom_point(size=1.5)+
+    geom_point(size=1.5,
+               aes(y=log2(belows_val$`D/ND_Ratio`[belows_val$VAF_threshold <= 0.009]),
+                           col="Below threshold"))+
+    theme_classic()+
+    theme(text = element_text(size=10, face="bold"),
+          legend.title = element_blank(),
+          legend.text = element_text(size = 6, face = "bold"),
+          #legend.position = c(0.741,0.35))+
+          legend.position = "none")+
+    scale_x_continuous(name="VAF threshold (%)", breaks = seq(0, 1, 0.2))+#, labels = scales::percent_format(accuracy = 0.1))+
+    scale_y_continuous(name="log2(D/ND Ratio)",breaks = seq(-1.5, 5 ,0.5))
+
+
+tiff("Figures_paper/VAL D_ND ML model v4.tiff", res = 300, width = 640, height = 640)
+print(D_ND_Ratio_plot_val)
+dev.off()
+
+
+# aboves_high_vaf_val <- ml_model_fun(val_exon_calls_model)[[1]] #0.008,0.04,17
+# aboves_high_vaf_val <- melt(aboves_high_vaf_val[,c(1,3,4)], id.vars = "VAF_threshold")
+D_ND_Ratio_high_vaf_plot_val <- ggplot(aboves_high_vaf_val, 
+                                   aes(x = VAF_threshold*100, y = value, fill = variable)) + 
+    geom_col() + 
+    scale_y_continuous(name = "Calls above threshold", breaks = seq(0,40,5))+
+    scale_x_continuous(name = "VAF threshold (%)", breaks = seq(0.8, 4, 0.2))+#,labels = scales::percent_format(accuracy = 0.1))+
+    scale_fill_manual(labels = c("Deleterious","Not deleterious"),values = c("orange","skyblue2"))+
+    theme_classic() + 
+    theme(text = element_text(size=10, face="bold"),
+          legend.title = element_blank(),
+          legend.key.size = unit(0.3,"cm"),
+          legend.text = element_text(size = 7, face = "bold"),
+          legend.position = c(0.75,0.9),
+          axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+tiff("Figures_paper/VAL D_ND ML model high vaf v4.tiff", res = 300, width = 880, height = 640)
+D_ND_Ratio_high_vaf_plot_val
+dev.off()
+
+```
+per patient 
+```{r}
+val_exon_calls_model$clean_names <- gsub("_.*","", val_exon_calls_model$`Sample Name`)
+val_exon_calls_model$clean_names <- gsub(" \\d.*","", val_exon_calls_model$clean_names)
+val_exon_calls_model$clean_names <- gsub("\\d.*","", val_exon_calls_model$clean_names)
+
+above_08_model_val <- val_exon_calls_model[val_exon_calls_model$VAF >= 0.008, ]
+
+D_ND_08_example_plot_val <- ggplot(above_08_model_val, 
+                                   aes(x = code, fill = final_label)) + 
+    geom_bar() + 
+    scale_y_continuous(name = "Calls above 0.8% VAF", breaks = seq(0,8,2))+
+    scale_x_discrete(name = "Patient ID")+
+    scale_fill_manual(labels = c("Deleterious","Not deleterious"), values = c("orange","skyblue2"))+
+    theme_classic() + 
+    theme(text = element_text(size=9, face="bold"),
+          legend.title = element_blank(),
+          legend.key.size = unit(0.3,"cm"),
+          legend.text = element_text(size = 7, face = "bold"),
+          legend.position = c(0.8,0.9),
+          axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+tiff("Figures_paper/D_ND 08 example val.tiff", res = 300, width = 853.3, height = 720)
+D_ND_08_example_plot_val
+dev.off()
+
+#0.4
+above_04_model_val <- val_exon_calls_model[val_exon_calls_model$VAF >= 0.004, ]
+
+D_ND_04_example_plot_val <- ggplot(above_04_model_val, 
+                                   aes(x = as.factor(clean_names), fill = final_label)) + 
+    geom_bar() + 
+    scale_y_continuous(name = "Calls above 0.004 VAF", breaks = seq(0,16,2))+
+    scale_x_discrete(name = "Patients")+
+    scale_fill_manual(labels = c("Deleterious","Not deleterious"), values = c("orange","skyblue2"))+
+    theme_classic() + 
+    theme(text = element_text(size=10, face="bold"),
+          legend.title = element_blank(),
+          legend.key.size = unit(0.3,"cm"),
+          legend.text = element_text(size = 6, face = "bold"),
+          legend.position = c(0.22,0.9),
+          axis.text.x = element_blank())
+          #axis.text.x = element_text(angle = 45, hjust = 1))
+
+tiff("Figures/D_ND 04 example val.tiff", res = 300, width = 853.3, height = 640)
+D_ND_04_example_plot_val
+dev.off()
+
+#0.1
+above_01_model_val <- val_exon_calls_model[val_exon_calls_model$VAF >= 0.001, ]
+
+D_ND_01_example_plot_val <- ggplot(above_01_model_val, 
+                                   aes(x = as.factor(clean_names), fill = final_label)) + 
+    geom_bar() + 
+    scale_y_continuous(name = "Calls above 0.001 VAF")+#, breaks = seq(0,16,2))+
+    scale_x_discrete(name = "Patients")+
+    scale_fill_manual(labels = c("Deleterious","Not deleterious"), values = c("orange","skyblue2"))+
+    theme_classic() + 
+    theme(text = element_text(size=10, face="bold"),
+          legend.title = element_blank(),
+          legend.key.size = unit(0.3,"cm"),
+          legend.text = element_text(size = 6, face = "bold"),
+          #legend.position = c(0.2,0.9),
+          axis.text.x = element_blank(), 
+          legend.position = "none")
+
+tiff("Figures/D_ND 01 example val.tiff", res = 300, width = 853.3, height = 640)
+D_ND_01_example_plot_val
+dev.off()
+
+
+```
+
+
+```{r amplicon_check}
+
+amplicons <- readxl::read_xlsx("design panel p53 life techno.xlsx", sheet = 1)
+colnames(amplicons)[c(1:4,8:9,12)] <- c("chr","start", "end", "ampl_name","exon", "exon_e","length")
+
+val_all_calls_ampl <- amplic_fun(amplicons, val_calls)
+table(is.na(val_all_calls_ampl$ampl_name))
+table(val_all_calls_ampl$ampl_name)
+
+val_all_calls_ampl$ampl_name <- factor(val_all_calls_ampl$ampl_name, 
+                                     levels = c("TP53_12.416326", "TP53_1111","TP53_11.1195092","TP53_11.1216011","TP53_11.943473","TP53_11.1324631","TP53_10.1.470","TP53_10.1.804509","TP53_10.215568","TP53_10.210186","TP53_10.1.366103","TP53_8.884088","TP53_7.148281","TP53_7.361197","TP53_5.803151","TP53_5.660062","TP53_5.305191","TP53_3.469162","TP53_4.33198","TP53_3.358320","TP53_2.557183","TP53_2.760385","TP53_1.3.1590469","TP53_1.3.1810912"))
+```
+plot
+```{r}
+val_vaf_by_ampl <- ggplot(val_all_calls_ampl, aes(x=ampl_name,y=Frequency))+
+    geom_boxplot(outlier.size = 1.75, outlier.alpha = 0.7, 
+                 color = c(rep("#F8766D",11),'#00BFC4',rep('#F8766D',4),'#00BFC4','#00BFC4','#F8766D','#00BFC4' ,rep('#F8766D',3), '#00BFC4'), 
+                 fill = "black")+
+    ggtitle("Verification cohort") + 
+    theme(
+        plot.title = element_text(size = 15, hjust = 0.5),
+        axis.text.x = element_text(angle = 90, vjust = 0.3)) + 
+    scale_y_continuous(name = "VAF (%)", limits = c(0,5), breaks = seq(0,5,0.5))+#, labels = scales::percent_format(accuracy = 0.1)) + 
+    scale_x_discrete(name = NULL)
+
+tiff("Figures_paper/Val VAF by amplicons v6.tiff", units = "in", width = 4, height = 14/2.5, res = 300)
+val_vaf_by_ampl
+dev.off()
+
+```
+
+```{r amplicons & VAF >= 0.005}
+
+g1 <- ggplot(amplicons_joined, aes(x=as.factor(ampl_name),y=num_calls_005_VAF/length))+
+    geom_col(width = .95, color = "dark red") +
+    theme_classic() +
+    scale_x_discrete(name = NULL) + 
+    scale_y_continuous(name = "Calls per amplicon length", limits = c(0, 0.9))+
+    ggtitle("Cohort calls, including intronic calls, VAF >= 0.005")+
+    theme(text = element_text(size = 5, face = "bold"),
+          axis.title.y = element_text(size = 7, face = "bold"),
+          axis.text.x = element_text(size = 4, angle = 45, hjust = 1),
+          legend.key.size = unit(0.2, "inch"))
+
+g2 <- ggplot(amplicons_joined, aes(x=as.factor(ampl_name),y=val_num_calls_005_VAF/length))+
+    geom_col(width = .95, color = "dark red") +
+    theme_classic() +
+    scale_x_discrete(name = NULL) + 
+    scale_y_continuous(name = "Calls per amplicon length", limits = c(0, 0.9))+
+    ggtitle("Validation cohort calls, VAF >= 0.005")+
+    theme(text = element_text(size = 5, face = "bold"),
+          axis.title.y = element_text(size = 7, face = "bold"),
+          axis.text.x = element_text(size = 4, angle = 45, hjust = 1),
+          legend.key.size = unit(0.2, "inch"))
+
+g3 <- ggplot(amplicons_joined, aes(x=as.factor(ampl_name),y=clines_num_calls_005_VAF/length))+
+    geom_col(width = .95, color = "dark red") +
+    theme_classic() +
+    scale_x_discrete(name = NULL) + 
+    scale_y_continuous(name = "Calls per amplicon length", limits = c(0, 0.2))+
+    ggtitle("Cell line calls, VAF >= 0.005")+
+    theme(text = element_text(size = 5, face = "bold"),
+          axis.title.y = element_text(size = 7, face = "bold"),
+          axis.text.x = element_text(size = 4, angle = 45, hjust = 1),
+          legend.key.size = unit(0.2, "inch"))
+
+# tiff("Figures/calls_005_VAF_per_amplicon.tiff", res = 200, width = 1440, height = 720)
+gridExtra::grid.arrange(g1,g2,g3, ncol =3)
+# dev.off()
+
+```
+
+```{r calls per amplicon}
+
+g1 <- ggplot(amplicon_calls, aes(x=factor(ampl_name, levels = levels(amplicons_joined$ampl_name)),y=vaf_char))+geom_boxplot(outlier.size = 1, fill = "red", colour = "black")+ggtitle("VAF by amplicons") + theme(plot.title = element_text(hjust = 0.5),panel.grid.major = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"),text = element_text(size = 10, face="bold"), axis.text.x = element_text(size=7.5, angle = 45, hjust = 1,)) + scale_y_continuous(name = "VAF", limits = c(0,0.047), breaks = seq(0,0.045,0.005)) + scale_x_discrete(name = NULL)
+
+g2 <- ggplot(amplicon_calls_val, aes(x=factor(ampl_name, levels = levels(amplicons_joined$ampl_name)),y=Frequency))+geom_boxplot(outlier.size = 1, fill = "red", colour = "black")+ggtitle("Validation cohort") + theme(plot.title = element_text(hjust = 0.5),panel.grid.major = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"),text = element_text(size = 10, face="bold"), axis.text.x = element_text(size=7.5, angle = 45, hjust = 1,)) + scale_y_continuous(name = NULL, limits = c(0,0.047), breaks = seq(0,0.045,0.005)) + scale_x_discrete(name = NULL)
+
+g3 <- ggplot(amplicon_calls_clines, aes(x=factor(ampl_name, levels = levels(amplicons_joined$ampl_name)),y=VAF))+geom_boxplot(outlier.size = 1, fill = "red", colour = "black")+ggtitle("Cell lines calls") + theme(plot.title = element_text(hjust = 0.5),panel.grid.major = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"),text = element_text(size = 10, face="bold"), axis.text.x = element_text(size=7.5, angle = 45, hjust = 1,)) + scale_y_continuous(name = NULL, limits = c(0,0.047), breaks = seq(0,0.045,0.005)) + scale_x_discrete(name = NULL)
+
+
+tiff("Figures/VAF_per_amplicon.tiff", res = 200, width = 1920, height = 1080)
+gridExtra::grid.arrange(g1,g2,g3, ncol =3)
+dev.off()
+
+```
